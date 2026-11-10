@@ -29,9 +29,12 @@ type countingProvider struct {
 
 func (p *countingProvider) Name() string { return p.name }
 
-func (p *countingProvider) Snapshot(_ context.Context, q provider.Query) (*domain.Snapshot, error) {
+func (p *countingProvider) Snapshot(ctx context.Context, q provider.Query) (*domain.Snapshot, error) {
 	p.calls.Add(1)
 	time.Sleep(p.delay)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
@@ -76,6 +79,31 @@ func TestSnapshotIsCachedAndCoalesced(t *testing.T) {
 	_, _ = svc.Snapshot(context.Background(), q)
 	if n := p.calls.Load(); n != 2 {
 		t.Errorf("fresh query must bypass the cache (calls = %d)", n)
+	}
+}
+
+func TestCancelledCallerDoesNotFailJoinedRequests(t *testing.T) {
+	p := &countingProvider{name: "sample", delay: 50 * time.Millisecond}
+	svc, _ := setup(t, map[string]*countingProvider{"sample": p})
+	q := svc.OverviewQuery(false)
+
+	ctx1, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = svc.Snapshot(ctx1, q) }()
+	// let the first caller start the shared call, then abandon it
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	snap, err := svc.Snapshot(context.Background(), q)
+	<-done
+	if err != nil {
+		t.Fatalf("joined caller failed: %v", err)
+	}
+	if snap == nil || len(snap.Lessons) != 1 {
+		t.Errorf("snapshot = %+v", snap)
+	}
+	if n := p.calls.Load(); n != 1 {
+		t.Errorf("provider called %d times, want 1", n)
 	}
 }
 

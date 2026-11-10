@@ -174,7 +174,12 @@ func (s *Service) Snapshot(ctx context.Context, q provider.Query) (*domain.Snaps
 	prov, gen := s.prov, s.gen
 	s.mu.Unlock()
 
-	c.snap, c.err = prov.Snapshot(ctx, q)
+	// The call is shared, so it must not die with one caller: an HTTP request
+	// that goes away (window closed, reload) would otherwise cancel the CLI for
+	// everyone waiting on it, including the background refresh, which then
+	// reports "untis did not answer in time" for a perfectly healthy backend.
+	// Values are kept; the provider applies its own timeout.
+	c.snap, c.err = prov.Snapshot(context.WithoutCancel(ctx), q)
 
 	s.mu.Lock()
 	delete(s.inflight, key)
