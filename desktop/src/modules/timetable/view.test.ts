@@ -23,6 +23,20 @@ describe("timetable view", () => {
     expect(el.querySelector(".st-exam .tt-badge")?.textContent).toBe("Exam");
   });
 
+  it("follows a date change in the URL", async () => {
+    history.replaceState(null, "", "#/timetable");
+    const ctx = await testContext(snapshot(), [timetable]);
+    const el = timetable.route!.render(ctx, new Scope(), new URLSearchParams({ date: "2026-10-07" }));
+    await settle();
+    const input = el.querySelector<HTMLInputElement>("input[type=date]")!;
+    expect(input.value).toBe("2026-10-07");
+
+    // history navigation changes the params without going through the toolbar
+    ctx.router.setParams({ date: "2026-10-14" });
+    await settle();
+    expect(input.value).toBe("2026-10-14");
+  });
+
   it("follows the settings", async () => {
     const el = await render({ timetable: { hideCancelled: true, mergeAdjacent: false, weekends: "always", showTeacher: false } });
     expect(el.querySelectorAll(".tt-day")).toHaveLength(7);

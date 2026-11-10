@@ -92,6 +92,21 @@ export function renderTimetable(ctx: AppContext, scope: Scope, params: URLSearch
     if (!first && last) draw(last);
   });
   scope.watch(ctx.data.revision, () => void load(), false);
+  // The shell only remounts on path changes, so follow query changes here:
+  // history navigation, or a step the toolbar did not trigger itself.
+  scope.watch(
+    ctx.router.route,
+    (r) => {
+      if (r.path !== "/timetable") return;
+      const nextMode = (r.params.get("mode") as Mode) || opt<Mode>(ctx, "defaultMode");
+      const nextAnchor = r.params.get("date") || today();
+      if (nextMode === mode && nextAnchor === anchor) return;
+      mode = nextMode;
+      anchor = nextAnchor;
+      void load();
+    },
+    false,
+  );
   // Keyboard commands (see the timetable module) arrive through the bus.
   scope.add(ctx.bus.on("timetable:go", (dir) => (dir === 0 ? go(today(), mode) : step(dir))));
   scope.add(ctx.bus.on("timetable:mode", (m) => go(anchor, m)));

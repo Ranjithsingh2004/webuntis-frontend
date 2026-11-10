@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/core/api/client";
 import { defineModule } from "@/core/module";
 import { settle, testContext } from "@/test/ctx";
@@ -22,6 +22,21 @@ describe("shell", () => {
     expect(root.querySelector(".view-b")).not.toBeNull();
     expect(root.querySelector(".nav-item.active")?.textContent).toBe("B");
     expect(root.querySelector(".topbar-title")?.textContent).toBe("B");
+  });
+
+  it("does not re-render the view when only the query changes", async () => {
+    const render = vi.fn(() => Object.assign(document.createElement("div"), { className: "view-b" }));
+    const ctx = await testContext(snapshot(), [defineModule({ id: "b", title: "B", icon: "info", route: { path: "/b", render } })]);
+    const root = document.createElement("div");
+    mountShell(root, ctx);
+    const view = root.querySelector(".view-b");
+    expect(render).toHaveBeenCalledTimes(1);
+
+    ctx.router.setParams({ q: "math" });
+    await settle();
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(root.querySelector(".view-b")).toBe(view);
+    expect(location.hash).toBe("#/b?q=math");
   });
 
   it("redirects unknown routes to the first page", async () => {

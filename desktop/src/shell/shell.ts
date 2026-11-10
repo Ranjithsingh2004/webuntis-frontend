@@ -23,6 +23,7 @@ export function mountShell(root: HTMLElement, ctx: AppContext): void {
   scope.watch(ctx.data.error, (err) => replace(banner, err ? errorBanner(ctx, err) : null));
 
   let viewScope: Scope | null = null;
+  let renderedPath: string | null = null;
   scope.watch(ctx.router.route, (route) => {
     const mod = ctx.modules.routeFor(route.path);
     if (!mod?.route) {
@@ -30,6 +31,11 @@ export function mountShell(root: HTMLElement, ctx: AppContext): void {
       if (first?.route) ctx.router.navigate(first.route.path);
       return;
     }
+    // A query-only change comes from setParams (timetable navigation, the
+    // settings search). Re-mounting would rebuild the page, scroll it to the
+    // top and drop focus, so the mounted view follows its params itself.
+    if (route.path === renderedPath) return;
+    renderedPath = route.path;
     viewScope?.dispose();
     viewScope = scope.child();
     title.textContent = ctx.i18n.t(mod.title);
