@@ -34,16 +34,18 @@ type Change struct {
 	Ref     string `json:"ref,omitempty"` // ID of the lesson, exam, homework or message
 }
 
-// Diff lists the changes from old to cur. Lessons are only compared on
-// days both windows cover, so moving the window is not a change.
+// Diff lists the changes from old to cur. Lessons, exams and homework are
+// only compared on days both windows cover, so moving the window is not a
+// change.
 func Diff(old, cur *domain.Snapshot) []Change {
 	if old == nil || cur == nil {
 		return nil
 	}
 	var out []Change
-	out = append(out, diffLessons(old, cur)...)
-	out = append(out, diffExams(old, cur)...)
-	out = append(out, diffHomework(old, cur)...)
+	inBoth := window(old, cur)
+	out = append(out, diffLessons(inBoth, old, cur)...)
+	out = append(out, diffExams(inBoth, old, cur)...)
+	out = append(out, diffHomework(inBoth, old, cur)...)
 	out = append(out, diffMessages(old, cur)...)
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Date+out[i].Start < out[j].Date+out[j].Start
@@ -55,11 +57,17 @@ func lessonKey(l domain.Lesson) string {
 	return l.Date + "|" + l.Start + "|" + shorts(l.Subjects) + "|" + l.Info
 }
 
-func diffLessons(old, cur *domain.Snapshot) []Change {
+// window returns the days both snapshots cover. Anything outside is reported
+// by the window moving, not by a change in WebUntis: the overview window slides
+// forward every day, so an exam or homework entering it at the far edge is not
+// new. Undated homework cannot be placed and is always considered.
+func window(old, cur *domain.Snapshot) func(string) bool {
 	from := max(old.Meta.From, cur.Meta.From)
 	to := min(old.Meta.To, cur.Meta.To)
-	inBoth := func(d string) bool { return d >= from && d <= to }
+	return func(d string) bool { return d == "" || (d >= from && d <= to) }
+}
 
+func diffLessons(inBoth func(string) bool, old, cur *domain.Snapshot) []Change {
 	before := map[string]domain.Lesson{}
 	for _, l := range old.Lessons {
 		if inBoth(l.Date) {
@@ -103,7 +111,7 @@ func diffLessons(old, cur *domain.Snapshot) []Change {
 	return out
 }
 
-func diffExams(old, cur *domain.Snapshot) []Change {
+func diffExams(inBoth func(string) bool, old, cur *domain.Snapshot) []Change {
 	key := func(e domain.Exam) string { return e.Date + "|" + shorts(e.Subjects) + "|" + e.Name }
 	before := map[string]bool{}
 	for _, e := range old.Exams {
@@ -113,26 +121,26 @@ func diffExams(old, cur *domain.Snapshot) []Change {
 	var out []Change
 	for _, e := range cur.Exams {
 		now[key(e)] = true
-		if !before[key(e)] {
+		if !before[key(e)] && inBoth(e.Date) {
 			out = append(out, Change{Kind: ExamAdded, Date: e.Date, Start: e.Start, Subject: shorts(e.Subjects), Detail: e.Name, Ref: e.ID})
 		}
 	}
 	for _, e := range old.Exams {
-		if !now[key(e)] && e.Date >= cur.Meta.From && e.Date <= cur.Meta.To {
+		if !now[key(e)] && inBoth(e.Date) {
 			out = append(out, Change{Kind: ExamRemoved, Date: e.Date, Start: e.Start, Subject: shorts(e.Subjects), Detail: e.Name, Ref: e.ID})
 		}
 	}
 	return out
 }
 
-func diffHomework(old, cur *domain.Snapshot) []Change {
+func diffHomework(inBoth func(string) bool, old, cur *domain.Snapshot) []Change {
 	before := map[string]bool{}
 	for _, h := range old.Homework {
 		before[h.ID] = true
 	}
 	var out []Change
 	for _, h := range cur.Homework {
-		if !before[h.ID] {
+		if !before[h.ID] && inBoth(h.DueDate) {
 			out = append(out, Change{Kind: HomeworkAdded, Date: h.DueDate, Subject: shorts(h.Subjects), Detail: h.Text, Ref: h.ID})
 		}
 	}
