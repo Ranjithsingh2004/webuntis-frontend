@@ -25,6 +25,10 @@ type countingProvider struct {
 	mu    sync.Mutex
 	room  string
 	err   error
+	// blank and errs simulate a partial error: the CLI answers with a full
+	// window but an empty section and the reason in Errors.
+	blank bool
+	errs  map[string]string
 }
 
 func (p *countingProvider) Name() string { return p.name }
@@ -38,11 +42,18 @@ func (p *countingProvider) Snapshot(_ context.Context, q provider.Query) (*domai
 		return nil, p.err
 	}
 	d := q.From.Format("2006-01-02")
-	return (&domain.Snapshot{
+	s := (&domain.Snapshot{
 		Meta: domain.Meta{Provider: p.name, From: d, To: q.To.Format("2006-01-02")},
 		Lessons: []domain.Lesson{{ID: "1", Date: d, Start: "08:00",
 			Subjects: []domain.Element{{Short: "MATH"}}, Rooms: []domain.Element{{Short: p.room}}}},
-	}).Ensure(), nil
+	}).Ensure()
+	if p.blank {
+		s.Lessons = []domain.Lesson{}
+	}
+	if p.errs != nil {
+		s.Errors = p.errs
+	}
+	return s, nil
 }
 
 func (p *countingProvider) Who(context.Context, string) ([]domain.Lookup, error) { return nil, nil }
@@ -102,6 +113,40 @@ func TestRefreshDetectsChanges(t *testing.T) {
 	want := []string{"snapshot", "snapshot", "changes"}
 	if len(types) != 3 || types[2] != want[2] {
 		t.Errorf("events = %v, want %v", types, want)
+	}
+}
+
+func TestPartialErrorDoesNotReportChanges(t *testing.T) {
+	p := &countingProvider{name: "sample", room: "R1"}
+	svc, _ := setup(t, map[string]*countingProvider{"sample": p})
+	if _, diff, err := svc.Refresh(context.Background(), true); err != nil || len(diff) != 0 {
+		t.Fatalf("first refresh: diff=%v err=%v", diff, err)
+	}
+
+	// the timetable section fails: empty lessons, reason in Errors
+	p.mu.Lock()
+	p.blank = true
+	p.errs = map[string]string{"timetable": "503 Service Unavailable"}
+	p.mu.Unlock()
+
+	snap, diff, err := svc.Refresh(context.Background(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff) != 0 {
+		t.Errorf("partial error reported changes: %+v", diff)
+	}
+	if len(snap.Lessons) != 1 {
+		t.Errorf("the last good lessons were dropped: %+v", snap.Lessons)
+	}
+
+	// when the CLI recovers, the carried-over lessons are not "added" again
+	p.mu.Lock()
+	p.blank = false
+	p.errs = nil
+	p.mu.Unlock()
+	if _, diff, err := svc.Refresh(context.Background(), true); err != nil || len(diff) != 0 {
+		t.Errorf("recovered refresh: diff=%v err=%v", diff, err)
 	}
 }
 

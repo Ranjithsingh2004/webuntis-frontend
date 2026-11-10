@@ -227,6 +227,7 @@ func (s *Service) Refresh(ctx context.Context, fresh bool) (*domain.Snapshot, []
 		s.bus.Publish(events.TypeError, info)
 		return nil, nil, err
 	}
+	carryOver(s.overview, snap)
 	var diff []changes.Change
 	if s.cfg.DetectChanges && s.overview != nil && s.overview != snap {
 		diff = changes.Diff(s.overview, snap)
@@ -241,6 +242,37 @@ func (s *Service) Refresh(ctx context.Context, fresh bool) (*domain.Snapshot, []
 		s.bus.Publish(events.TypeChanges, diff)
 	}
 	return snap, diff, nil
+}
+
+// carryOver copies the sections the CLI could not fetch from the previous
+// snapshot. A partial error (timetable.error, exams.error, …) still returns a
+// full Meta window with an empty section, so diffing it would report every
+// lesson as dropped and every exam as removed, and the next successful refresh
+// would report them all as added again. Keeping the last good data also stops
+// the views from emptying on a short hiccup.
+func carryOver(prev, cur *domain.Snapshot) {
+	if prev == nil || cur == nil || len(cur.Errors) == 0 {
+		return
+	}
+	if _, failed := cur.Errors["timetable"]; failed {
+		cur.TimeGrid = prev.TimeGrid
+		cur.Lessons = prev.Lessons
+	}
+	if _, failed := cur.Errors["exams"]; failed {
+		cur.Exams = prev.Exams
+	}
+	if _, failed := cur.Errors["homework"]; failed {
+		cur.Homework = prev.Homework
+	}
+	if _, failed := cur.Errors["absences"]; failed {
+		cur.Absences = prev.Absences
+	}
+	if _, failed := cur.Errors["messages"]; failed {
+		cur.Messages = prev.Messages
+	}
+	if _, failed := cur.Errors["holidays"]; failed {
+		cur.Holidays = prev.Holidays
+	}
 }
 
 // Run refreshes in the background until ctx ends.
