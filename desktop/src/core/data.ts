@@ -48,8 +48,11 @@ export class DataService {
       (ev) => {
         switch (ev.type) {
           case "snapshot":
+            // Published after every successful background refresh, which also
+            // moves lastRefresh/nextRefresh and clears lastError.
             this.invalidate();
             void this.loadOverview();
+            void this.loadStatus();
             break;
           case "changes":
             this.bus.emit("changes", (ev.data as Change[]) ?? []);

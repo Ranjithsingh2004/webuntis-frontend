@@ -49,6 +49,22 @@ describe("DataService", () => {
     expect(api.snapshot).toHaveBeenCalledTimes(2);
   });
 
+  it("reloads the service status after a background refresh", async () => {
+    // the status page shows lastRefresh/nextRefresh/lastError, which a
+    // background refresh changes without any other event
+    let st = { version: "t", service: { lastRefresh: "2026-10-07T08:00:00Z" } };
+    const { api, data, emit } = setup({ status: vi.fn(async () => structuredClone(st)) });
+    data.start();
+    await tick();
+    expect(data.status.get()?.service.lastRefresh).toBe("2026-10-07T08:00:00Z");
+
+    st = { version: "t", service: { lastRefresh: "2026-10-07T09:00:00Z" } };
+    emit({ type: "snapshot", at: "" });
+    await tick();
+    expect(api.status).toHaveBeenCalledTimes(2);
+    expect(data.status.get()?.service.lastRefresh).toBe("2026-10-07T09:00:00Z");
+  });
+
   it("forwards change events to the bus", () => {
     const { bus, data, emit } = setup();
     const seen = vi.fn();
