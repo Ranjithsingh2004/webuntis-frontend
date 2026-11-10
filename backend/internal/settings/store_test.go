@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 )
 
 func open(t *testing.T) (*Store, string) {
@@ -50,6 +52,54 @@ func TestPatchMergesAndPersists(t *testing.T) {
 	dir, _ := os.Stat(filepath.Dir(path))
 	if dir.Mode().Perm() != 0o700 {
 		t.Errorf("dir mode = %v, want 0700", dir.Mode().Perm())
+	}
+}
+
+func TestSubscribersSeeWritesInOrder(t *testing.T) {
+	s, _ := open(t)
+
+	var mu sync.Mutex
+	var seen []string
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	// a plain flag, not sync.Once: Do holds its own lock, which would make the
+	// second notification wait here as well and hide the ordering bug
+	var flagMu sync.Mutex
+	first := true
+	s.Subscribe(func(doc Document) {
+		flagMu.Lock()
+		isFirst := first
+		first = false
+		flagMu.Unlock()
+		if isFirst {
+			close(entered)
+			<-release
+		}
+		mu.Lock()
+		seen = append(seen, doc["mark"].(string))
+		mu.Unlock()
+	})
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); errs <- s.Patch(Document{"mark": "A"}) }()
+	<-entered // A is being delivered and is held here
+	wg.Add(1)
+	go func() { defer wg.Done(); errs <- s.Patch(Document{"mark": "B"}) }()
+	// let B finish its write and reach the notification
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		must(t, err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 || seen[len(seen)-1] != "B" {
+		t.Errorf("subscribers saw %v, the newest write must be delivered last", seen)
 	}
 }
 

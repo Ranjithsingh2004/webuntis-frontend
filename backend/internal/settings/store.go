@@ -31,6 +31,11 @@ type Store struct {
 	mu   sync.RWMutex
 	doc  Document
 	subs []func(Document)
+
+	// notifyMu keeps the notifications in write order, see notify.
+	notifyMu sync.Mutex
+	seq      int
+	notified int
 }
 
 // DefaultPath is $XDG_CONFIG_HOME/untis-gui/settings.json (or the
@@ -64,17 +69,17 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// Path returns the file the settings are stored in.
+// Path is where the settings are stored.
 func (s *Store) Path() string { return s.path }
 
-// Get returns a deep copy of the whole document.
+// Get returns a copy of the whole document.
 func (s *Store) Get() Document {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return clone(s.doc)
 }
 
-// Replace swaps the whole document.
+// Replace overwrites the document.
 func (s *Store) Replace(doc Document) error {
 	if doc == nil {
 		doc = Document{}
@@ -110,14 +115,32 @@ func (s *Store) update(change func(Document) Document) error {
 		return err
 	}
 	s.doc = next
+	s.seq++
+	seq := s.seq
 	subs := append([]func(Document){}, s.subs...)
 	snapshot := clone(next)
 	s.mu.Unlock()
 
-	for _, fn := range subs {
-		fn(clone(snapshot))
-	}
+	s.notify(seq, subs, snapshot)
 	return nil
+}
+
+// notify delivers a write to the subscribers in order. Two writes A and B can
+// reach this point in either order once the lock is released, and a subscriber
+// that acts on the document (the service rebuilds the provider from it) would
+// then keep applying the older one, leaving the backend on stale settings. A
+// notification is dropped when a newer document has already been delivered:
+// that newer document contains the older write anyway.
+func (s *Store) notify(seq int, subs []func(Document), doc Document) {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	if seq < s.notified {
+		return
+	}
+	s.notified = seq
+	for _, fn := range subs {
+		fn(clone(doc))
+	}
 }
 
 // writeAtomic writes the document to a temporary file next to path and
