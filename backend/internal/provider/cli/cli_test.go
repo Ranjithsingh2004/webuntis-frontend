@@ -107,11 +107,13 @@ func TestBadJSON(t *testing.T) {
 
 func TestWho(t *testing.T) {
 	r := &fakeRunner{res: Result{Stdout: []byte("TCH1   teacher   Sample Teacher\nR101   room      Classroom, building T\nnoise\n")}}
-	got, err := New(Config{Offline: true}, r).Who(context.Background(), "TCH1")
+	cfg := Config{Offline: true, ExtraArgs: []string{"--profile", "school2"}}
+	got, err := New(cfg, r).Who(context.Background(), "TCH1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"--who", "TCH1", "--offline"}; !reflect.DeepEqual(r.calls[0], want) {
+	// the extra arguments belong to every data call, the code lookup included
+	if want := []string{"--who", "TCH1", "--offline", "--profile", "school2"}; !reflect.DeepEqual(r.calls[0], want) {
 		t.Errorf("args = %v, want %v", r.calls[0], want)
 	}
 	if len(got) != 2 || got[0].Kind != "teacher" || got[1].Name != "Classroom, building T" {

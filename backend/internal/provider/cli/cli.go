@@ -114,12 +114,16 @@ func (p *Provider) Snapshot(ctx context.Context, q provider.Query) (*domain.Snap
 	return payload.ToSnapshot(p.Name(), p.now()), nil
 }
 
-// Who runs `untis --who CODE`.
+// Who runs `untis --who CODE`. The extra arguments are added here as well:
+// they carry options the GUI has no field for (a school profile, a proxy, a
+// cache directory), and without them the lookup answers for another profile or
+// fails although the snapshot call works.
 func (p *Provider) Who(ctx context.Context, code string) ([]domain.Lookup, error) {
 	args := append(p.commonArgs(), "--who", code)
 	if p.cfg.Offline {
 		args = append(args, "--offline")
 	}
+	args = append(args, p.cfg.ExtraArgs...)
 	res, err := p.exec(ctx, args)
 	if err != nil {
 		return nil, err
