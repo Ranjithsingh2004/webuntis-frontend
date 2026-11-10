@@ -4,7 +4,16 @@ import { Signal, type ReadSignal, type Unsubscribe } from "./reactive";
 
 type Path = string; // dot separated, e.g. "ui.theme.accent"
 
+/** A path segment that would reach the prototype rather than a setting. */
+const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Settings paths are dot separated and must stay inside the document. */
+function isSafePath(path: Path): boolean {
+  return path.split(".").every((key) => key !== "" && !FORBIDDEN_SEGMENTS.has(key));
+}
+
 export function getPath(doc: unknown, path: Path): unknown {
+  if (!isSafePath(path)) return undefined;
   let cur = doc;
   for (const key of path.split(".")) {
     if (cur === null || typeof cur !== "object") return undefined;
@@ -15,6 +24,7 @@ export function getPath(doc: unknown, path: Path): unknown {
 
 /** Builds the nested merge patch {a: {b: value}} for "a.b". */
 export function patchFor(path: Path, value: unknown): SettingsDocument {
+  if (!isSafePath(path)) return {};
   const keys = path.split(".");
   const root: SettingsDocument = {};
   let cur = root;
@@ -26,6 +36,7 @@ export function patchFor(path: Path, value: unknown): SettingsDocument {
 }
 
 function setPath(doc: SettingsDocument, path: Path, value: unknown): SettingsDocument {
+  if (!isSafePath(path)) return doc;
   const out = structuredClone(doc);
   const keys = path.split(".");
   let cur = out as Record<string, unknown>;

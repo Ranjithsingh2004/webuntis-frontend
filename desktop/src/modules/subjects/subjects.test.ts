@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Scope } from "@/core/reactive";
 import { settle, testContext } from "@/test/ctx";
-import { snapshot } from "@/test/fixtures";
+import { lesson, snapshot } from "@/test/fixtures";
 import timetable from "@/modules/timetable";
 import subjects from "./index";
-import { subjectEditor, toHex } from "./editor";
+import { applySubjectOverride, removeSubjectOverride, subjectEditor, toHex } from "./editor";
 
 describe("subject editor", () => {
   it("lists subjects from the data and stores overrides", async () => {
@@ -34,6 +34,37 @@ describe("subject editor", () => {
   it("converts auto colours for the colour picker", () => {
     expect(toHex("hsl(0 100% 50%)")).toBe("#ff0000");
     expect(toHex("#123456")).toBe("#123456");
+  });
+});
+
+describe("subject overrides with a dotted code", () => {
+  it("keeps the whole code as one key", () => {
+    // `D.LK` written as the dotted path subjects.custom.D.LK became
+    // { D: { LK: ... } }, which the display never found again
+    expect(applySubjectOverride({}, "D.LK", { name: "Deutsch" })).toEqual({
+      "D.LK": { name: "Deutsch" },
+    });
+  });
+
+  it("merges into and clears a single override", () => {
+    const start = { "D.LK": { name: "Deutsch", color: "#ff0000" } };
+    expect(applySubjectOverride(start, "D.LK", { color: "" })).toEqual({
+      "D.LK": { name: "Deutsch" },
+    });
+    expect(applySubjectOverride({ "D.LK": { name: "Deutsch" } }, "D.LK", { name: "" })).toEqual({});
+  });
+
+  it("removes one code without touching a code that prefixes it", () => {
+    expect(removeSubjectOverride({ D: { name: "Dot" }, "D.LK": { name: "Deutsch" } }, "D.LK")).toEqual({
+      D: { name: "Dot" },
+    });
+  });
+
+  it("is applied by the display once stored in settings", async () => {
+    const ctx = await testContext(snapshot(), [subjects]);
+    ctx.settings.set("subjects.custom", { "D.LK": { name: "Deutsch", hidden: false } });
+    const replaced = lesson("2026-10-07", "08:00", "08:50", "D.LK");
+    expect(ctx.display.subject(replaced)).toBe("Deutsch");
   });
 });
 

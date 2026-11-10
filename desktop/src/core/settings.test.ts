@@ -22,6 +22,15 @@ describe("path helpers", () => {
   it("builds merge patches", () => {
     expect(patchFor("a.b.c", 1)).toEqual({ a: { b: { c: 1 } } });
   });
+
+  it("refuses a path that reaches the prototype", () => {
+    // subject codes and other keys come from school data, so a path segment
+    // like `__proto__` must never be followed
+    expect(getPath({}, "__proto__.polluted")).toBeUndefined();
+    expect(getPath({}, "constructor.prototype.polluted")).toBeUndefined();
+    expect(patchFor("__proto__.polluted", 1)).toEqual({});
+    expect(patchFor("constructor.prototype.polluted", 1)).toEqual({});
+  });
 });
 
 describe("SettingsStore", () => {

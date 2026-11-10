@@ -4,15 +4,47 @@ import { h, replace } from "@/core/dom";
 import { icon } from "@/core/icons";
 import type { Scope } from "@/core/reactive";
 
+/**
+ * Applies one change to the per-subject override map.
+ *
+ * The map is written whole, keyed by the subject code, rather than as the
+ * dotted path `subjects.custom.<code>`: WebUntis codes such as `D.LK` or
+ * `M.g1` contain dots, and a dotted path splits them into nested objects that
+ * then never match the code again.
+ */
+export function applySubjectOverride(
+  all: Record<string, SubjectOverride>,
+  code: string,
+  patch: Partial<SubjectOverride>,
+): Record<string, SubjectOverride> {
+  const map = { ...all };
+  const next: SubjectOverride = { ...map[code], ...patch };
+  for (const k of Object.keys(next) as (keyof SubjectOverride)[]) {
+    if (next[k] === "" || next[k] === false || next[k] === undefined) delete next[k];
+  }
+  if (Object.keys(next).length) map[code] = next;
+  else delete map[code];
+  return map;
+}
+
+/** Removes every override for one subject code. */
+export function removeSubjectOverride(
+  all: Record<string, SubjectOverride>,
+  code: string,
+): Record<string, SubjectOverride> {
+  const map = { ...all };
+  delete map[code];
+  return map;
+}
+
 /** One row per subject found in the data: rename, colour, emoji, hide. */
 export function subjectEditor(ctx: AppContext, scope: Scope): HTMLElement {
   const table = h("div", { class: "subject-editor" });
   const all = () => ctx.settings.get<Record<string, SubjectOverride>>("subjects.custom", {});
-  const update = (code: string, patch: Partial<SubjectOverride>) => {
-    const next: SubjectOverride = { ...all()[code], ...patch };
-    for (const k of Object.keys(next) as (keyof SubjectOverride)[]) if (next[k] === "" || next[k] === false || next[k] === undefined) delete next[k];
-    ctx.settings.set(`subjects.custom.${code}`, Object.keys(next).length ? next : null);
-  };
+  // Always store the map itself, empty included: it is one setting, and an
+  // empty object keeps `get("subjects.custom")` returning a map to render.
+  const save = (map: Record<string, SubjectOverride>) => ctx.settings.set("subjects.custom", map);
+  const update = (code: string, patch: Partial<SubjectOverride>) => save(applySubjectOverride(all(), code, patch));
 
   let structure = "";
   const render = () => {
@@ -35,7 +67,7 @@ export function subjectEditor(ctx: AppContext, scope: Scope): HTMLElement {
         emoji.addEventListener("change", () => update(s.short, { emoji: emoji.value.trim() }));
         const hidden = h("input", { type: "checkbox", class: "switch", checked: !!o.hidden, title: "Hide everywhere", attrs: { "aria-label": `Hide ${s.short}` } });
         hidden.addEventListener("change", () => update(s.short, { hidden: hidden.checked }));
-        const reset = h("button", { type: "button", class: "icon-btn", title: "Reset this subject", onclick: () => { ctx.settings.set(`subjects.custom.${s.short}`, null); structure = ""; render(); } }, icon("undo", 14));
+        const reset = h("button", { type: "button", class: "icon-btn", title: "Reset this subject", onclick: () => { save(removeSubjectOverride(all(), s.short)); structure = ""; render(); } }, icon("undo", 14));
         return h("div", { class: "subject-row", dataset: { code: s.short } }, h("div", null, h("strong", null, s.short), h("div", { class: "muted small" }, s.long ?? "")), name, color, emoji, h("label", { class: "row-inline small muted" }, hidden, "hide"), reset);
       }),
     );
