@@ -79,11 +79,15 @@ export class Display {
 
   /** Whether a subject list passes the hidden flags and only/except filter. */
   private keep(subjects: Element[]): boolean {
-    if (subjects.some((s) => this.override(s.short).hidden)) return false;
+    // WebUntis marks a replaced subject as REMOVED and adds the new one beside
+    // it. Only the subjects actually being taught decide visibility, otherwise
+    // hiding the subject that was replaced hides the lesson that replaced it.
+    const active = subjects.filter((s) => s.status !== "REMOVED");
+    if (active.some((s) => this.override(s.short).hidden)) return false;
     const mode = this.settings.get<string>("filters.mode", "none");
     const entries = this.settings.get<string[]>("filters.subjects", []);
     if (mode === "none" || !entries.length) return true;
-    const hit = subjects.some((s) => entries.some((e) => matchesEntry(s, e)));
+    const hit = active.some((s) => entries.some((e) => matchesEntry(s, e)));
     // Like `untis --only/--except`: events have no subject, so --only
     // hides them and --except keeps them.
     return mode === "only" ? hit : !hit;
@@ -110,7 +114,10 @@ export class Display {
    * user chose to colour by subject everywhere.
    */
   subjectStyle(l: Pick<Lesson, "subjects"> & { status?: Lesson["status"] }): SubjectStyle {
-    const first = l.subjects[0];
+    // The replaced subject stays first in the list, so colouring by
+    // `subjects[0]` paints a substituted lesson in the colour and emoji of the
+    // subject it no longer is. Use the first subject still being taught.
+    const first = l.subjects.find((s) => s.status !== "REMOVED") ?? l.subjects[0];
     if (!first) return {};
     const o = this.override(first.short);
     const colorMode = this.settings.get<string>("subjects.colorMode", "status");

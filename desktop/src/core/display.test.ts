@@ -80,3 +80,38 @@ describe("collectSubjects", () => {
     expect(got).toEqual([{ short: "A", long: undefined }, { short: "B", long: "Bee" }]);
   });
 });
+
+describe("replaced subjects", () => {
+  // WebUntis keeps the replaced subject on the lesson with status REMOVED and
+  // puts the subject that replaced it beside it, so `REL` becomes `MATH` here.
+  const replaced = lesson("2026-10-07", "08:00", "08:50", "REL", {
+    subjects: [{ short: "REL", status: "REMOVED" }, { short: "MATH" }],
+    substitution: true,
+  });
+
+  it("keeps the lesson when the replaced subject is hidden", async () => {
+    const d = await display({ subjects: { custom: { REL: { hidden: true } } } });
+    expect(d.visibleLessons([replaced])).toHaveLength(1);
+    expect(d.subject(replaced)).toBe("MATH");
+  });
+
+  it("does not match filters through the replaced subject", async () => {
+    const onlyRel = await display({ filters: { mode: "only", subjects: ["REL"] } });
+    expect(onlyRel.visibleLessons([replaced])).toEqual([]);
+    const onlyMath = await display({ filters: { mode: "only", subjects: ["MATH"] } });
+    expect(onlyMath.visibleLessons([replaced])).toHaveLength(1);
+    const exceptRel = await display({ filters: { mode: "except", subjects: ["REL"] } });
+    expect(exceptRel.visibleLessons([replaced])).toHaveLength(1);
+  });
+
+  it("styles the lesson by the subject that replaced it", async () => {
+    const d = await display({ subjects: { custom: { REL: { color: "#ff0000", emoji: "🕊" }, MATH: { color: "#0000ff", emoji: "📐" } } } });
+    expect(d.subjectStyle(replaced)).toEqual({ color: "#0000ff", emoji: "📐" });
+  });
+
+  it("falls back to the first subject when every subject is removed", async () => {
+    const allRemoved = lesson("2026-10-07", "09:00", "09:50", "REL", { subjects: [{ short: "REL", status: "REMOVED" }] });
+    const d = await display({ subjects: { custom: { REL: { color: "#ff0000" } } } });
+    expect(d.subjectStyle(allRemoved).color).toBe("#ff0000");
+  });
+});
