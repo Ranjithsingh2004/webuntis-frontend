@@ -50,6 +50,25 @@ function setPath(doc: SettingsDocument, path: Path, value: unknown): SettingsDoc
   return out;
 }
 
+/**
+ * The patch that turns `cur` into `next`: keys `next` no longer has become
+ * null, because merging an object into another unions their keys and nothing
+ * else ever removes one. Keys are taken literally, so a subject code with a
+ * dot in it (`D.LK`) stays one key instead of becoming a nested path.
+ */
+export function diffObject(cur: unknown, next: Record<string, unknown>): SettingsDocument {
+  const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+  const before = isObj(cur) ? cur : {};
+  const out: SettingsDocument = {};
+  for (const k of Object.keys(before)) {
+    if (!Object.prototype.hasOwnProperty.call(next, k)) out[k] = null;
+  }
+  for (const [k, v] of Object.entries(next)) {
+    out[k] = isObj(v) && isObj(before[k]) ? diffObject(before[k], v) : v;
+  }
+  return out;
+}
+
 /** Merges merge patches; unlike applying them, null values are kept so
  * the backend still sees the deletion. */
 function combinePatches(a: SettingsDocument, b: SettingsDocument): SettingsDocument {
@@ -123,7 +142,26 @@ export class SettingsStore {
   /** Sets a value; undefined or null resets it to its default. */
   set(path: Path, value: unknown): void {
     this.doc.set(setPath(this.doc.get(), path, value));
-    this.pending = combinePatches(this.pending, patchFor(path, value ?? null));
+    this.queue(patchFor(path, value ?? null));
+  }
+
+  /**
+   * Replaces the object stored at path, deleting the keys it lost.
+   *
+   * Unlike set(), an empty value is kept as an empty object rather than
+   * resetting the setting, and keys are compared literally: this is what
+   * per-subject overrides need, since their keys are subject codes and a code
+   * like `D.LK` cannot be addressed as a dotted path.
+   */
+  setObject(path: Path, value: Record<string, unknown>): void {
+    if (!isSafePath(path)) return;
+    const patch = diffObject(getPath(this.doc.get(), path), value);
+    this.doc.set(setPath(this.doc.get(), path, value));
+    this.queue(patchFor(path, patch));
+  }
+
+  private queue(patch: SettingsDocument): void {
+    this.pending = combinePatches(this.pending, patch);
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush(), 250);
   }

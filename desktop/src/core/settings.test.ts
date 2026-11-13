@@ -2,6 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api/client";
 import { SettingsStore, getPath, patchFor } from "./settings";
 
+/** RFC 7386 apply, the way the backend merges a settings patch. */
+function mergePatch(doc: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const out = structuredClone(doc);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else if (v && typeof v === "object" && !Array.isArray(v))
+      out[k] = mergePatch((out[k] as Record<string, unknown>) ?? {}, v as Record<string, unknown>);
+    else out[k] = v;
+  }
+  return out;
+}
+
 function fakeApi(initial: Record<string, unknown> = {}) {
   const patches: unknown[] = [];
   const api = {
@@ -42,6 +54,56 @@ describe("SettingsStore", () => {
     expect(s.get("ui.theme")).toBe("dark");
     expect(s.get("ui.density")).toBe("cozy");
     expect(s.isSet("ui.density")).toBe(false);
+  });
+
+  it("replaces a map so the keys it lost are deleted by the merge", async () => {
+    vi.useFakeTimers();
+    const { api, patches } = fakeApi({
+      subjects: { custom: { "D.LK": { name: "Deutsch" }, MATH: { hidden: true } } },
+    });
+    const s = new SettingsStore(api);
+    await s.load();
+    s.setObject("subjects.custom", { "D.LK": { name: "Deutsch", color: "#00ff00" } });
+    await vi.advanceTimersByTimeAsync(300);
+    // MATH has to be nulled out: merging the map would keep it, and a dotted
+    // code must stay one key rather than becoming { D: { LK: ... } }
+    expect(patches).toEqual([
+      { subjects: { custom: { MATH: null, "D.LK": { name: "Deutsch", color: "#00ff00" } } } },
+    ]);
+    expect(mergePatch({ subjects: { custom: { "D.LK": { name: "Deutsch" }, MATH: { hidden: true } } } }, patches[0] as Record<string, unknown>)).toEqual({
+      subjects: { custom: { "D.LK": { name: "Deutsch", color: "#00ff00" } } },
+    });
+    vi.useRealTimers();
+  });
+
+  it("sends null for a field dropped inside a stored object", async () => {
+    vi.useFakeTimers();
+    // switching "hide" off removes the field from the override, which a merge
+    // would otherwise never notice: the backend kept hidden: true
+    const { api, patches } = fakeApi({ subjects: { custom: { MATH: { hidden: true, name: "Mathe" } } } });
+    const s = new SettingsStore(api);
+    await s.load();
+    s.setObject("subjects.custom", { MATH: { name: "Mathe" } });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patches).toEqual([{ subjects: { custom: { MATH: { hidden: null, name: "Mathe" } } } }]);
+    expect(mergePatch({ subjects: { custom: { MATH: { hidden: true, name: "Mathe" } } } }, patches[0] as Record<string, unknown>)).toEqual({
+      subjects: { custom: { MATH: { name: "Mathe" } } },
+    });
+    vi.useRealTimers();
+  });
+
+  it("deletes every key when the map becomes empty", async () => {
+    vi.useFakeTimers();
+    const { api, patches } = fakeApi({ subjects: { custom: { "D.LK": { name: "Deutsch" }, MATH: { hidden: true } } } });
+    const s = new SettingsStore(api);
+    await s.load();
+    s.setObject("subjects.custom", {});
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patches).toEqual([{ subjects: { custom: { "D.LK": null, MATH: null } } }]);
+    expect(mergePatch({ subjects: { custom: { "D.LK": { name: "Deutsch" }, MATH: { hidden: true } } } }, patches[0] as Record<string, unknown>)).toEqual({
+      subjects: { custom: {} },
+    });
+    vi.useRealTimers();
   });
 
   it("applies writes locally and batches them into one patch", async () => {

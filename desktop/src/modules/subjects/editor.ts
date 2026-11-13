@@ -43,7 +43,9 @@ export function subjectEditor(ctx: AppContext, scope: Scope): HTMLElement {
   const all = () => ctx.settings.get<Record<string, SubjectOverride>>("subjects.custom", {});
   // Always store the map itself, empty included: it is one setting, and an
   // empty object keeps `get("subjects.custom")` returning a map to render.
-  const save = (map: Record<string, SubjectOverride>) => ctx.settings.set("subjects.custom", map);
+  // setObject(), not set(): a merge patch would union the map, so a subject
+  // whose override was reset would stay on the backend forever.
+  const save = (map: Record<string, SubjectOverride>) => ctx.settings.setObject("subjects.custom", map);
   const update = (code: string, patch: Partial<SubjectOverride>) => save(applySubjectOverride(all(), code, patch));
 
   let structure = "";
