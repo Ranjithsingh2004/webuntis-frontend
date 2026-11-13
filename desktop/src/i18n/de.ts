@@ -336,8 +336,8 @@ export const de: Dictionary = {
   "Credentials file": "Zugangsdaten-Datei",
   "Optional --env path. Empty uses the CLI default.": "Optionaler --env-Pfad. Leer nutzt den CLI-Standard.",
   "Extra arguments": "Zusätzliche Argumente",
-  "Appended to every call, for CLI options without a field here. Press Enter to add.":
-    "Werden an jeden Aufruf angehängt, für CLI-Optionen ohne eigenes Feld. Mit Enter hinzufügen.",
+  "Appended to the snapshot and lookup calls, for CLI options without a field here. Press Enter to add.":
+    "Wird an den Snapshot- und den Lookup-Aufruf angehängt, für CLI-Optionen ohne eigenes Feld. Mit Enter hinzufügen.",
   "Timeout": "Zeitlimit",
   "Give up on a CLI call after this long.": "CLI-Aufrufe nach dieser Zeit abbrechen.",
 

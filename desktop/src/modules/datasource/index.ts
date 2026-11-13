@@ -147,7 +147,7 @@ export default defineModule({
           key: "backend.cli.extraArgs",
           type: "list",
           label: "Extra arguments",
-          description: "Appended to every call, for CLI options without a field here. Press Enter to add.",
+          description: "Appended to the snapshot and lookup calls, for CLI options without a field here. Press Enter to add.",
           default: [],
           placeholder: "--long",
           visibleIf: isCLI,
