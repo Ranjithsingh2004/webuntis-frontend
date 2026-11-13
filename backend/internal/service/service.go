@@ -227,12 +227,18 @@ func (s *Service) Refresh(ctx context.Context, fresh bool) (*domain.Snapshot, []
 		s.bus.Publish(events.TypeError, info)
 		return nil, nil, err
 	}
-	carryOver(s.overview, snap)
+	// A partial error arrives with a full window and an empty section, so the
+	// previous data is carried over before diffing. carryOver returns a new
+	// snapshot rather than editing this one: snap is already in the cache and
+	// other callers hold it.
+	fetched := snap
+	snap = carryOver(s.overview, snap)
 	var diff []changes.Change
 	if s.cfg.DetectChanges && s.overview != nil && s.overview != snap {
-		diff = changes.Diff(s.overview, snap)
+		diff = withoutFailedSections(s.overview, snap, changes.Diff(s.overview, snap))
 	}
 	s.overview = snap
+	s.replaceCached(fetched, snap)
 	s.lastErr = nil
 	s.lastRefresh = s.now()
 	s.mu.Unlock()
@@ -250,29 +256,86 @@ func (s *Service) Refresh(ctx context.Context, fresh bool) (*domain.Snapshot, []
 // lesson as dropped and every exam as removed, and the next successful refresh
 // would report them all as added again. Keeping the last good data also stops
 // the views from emptying on a short hiccup.
-func carryOver(prev, cur *domain.Snapshot) {
+func carryOver(prev, cur *domain.Snapshot) *domain.Snapshot {
 	if prev == nil || cur == nil || len(cur.Errors) == 0 {
-		return
+		return cur
 	}
+	// Work on a copy. cur is already in the cache and handed to other callers,
+	// so writing into it raced every reader that serialised it: a reader that
+	// held the cached snapshot and called json.Marshal while Refresh edited the
+	// sections was reported by `go test -race`.
+	merged := *cur
 	if _, failed := cur.Errors["timetable"]; failed {
-		cur.TimeGrid = prev.TimeGrid
-		cur.Lessons = prev.Lessons
+		merged.TimeGrid = prev.TimeGrid
+		merged.Lessons = prev.Lessons
 	}
 	if _, failed := cur.Errors["exams"]; failed {
-		cur.Exams = prev.Exams
+		merged.Exams = prev.Exams
 	}
 	if _, failed := cur.Errors["homework"]; failed {
-		cur.Homework = prev.Homework
+		merged.Homework = prev.Homework
 	}
 	if _, failed := cur.Errors["absences"]; failed {
-		cur.Absences = prev.Absences
+		merged.Absences = prev.Absences
 	}
 	if _, failed := cur.Errors["messages"]; failed {
-		cur.Messages = prev.Messages
+		merged.Messages = prev.Messages
 	}
 	if _, failed := cur.Errors["holidays"]; failed {
-		cur.Holidays = prev.Holidays
+		merged.Holidays = prev.Holidays
 	}
+	return &merged
+}
+
+// replaceCached makes next the cached answer wherever old was cached, so a
+// caller that asks again gets the snapshot this refresh settled on. The caller
+// holds s.mu.
+func (s *Service) replaceCached(old, next *domain.Snapshot) {
+	if old == next {
+		return
+	}
+	for key, entry := range s.cache {
+		if entry.snap == old {
+			entry.snap = next
+			s.cache[key] = entry
+		}
+	}
+}
+
+// sectionKinds lists the change kinds each CLI section produces.
+var sectionKinds = map[string][]string{
+	"timetable": {changes.Cancelled, changes.Substitution, changes.RoomChange, changes.Removed, changes.LessonAdded, changes.LessonDropped},
+	"exams":     {changes.ExamAdded, changes.ExamRemoved},
+	"homework":  {changes.HomeworkAdded},
+	"messages":  {changes.MessageNew},
+}
+
+// withoutFailedSections drops the changes belonging to a section the CLI could
+// not fetch on either side. carryOver covers a section that fails after a good
+// refresh, but the first refresh after start has nothing to carry over, so its
+// recovery would report every lesson as added.
+func withoutFailedSections(prev, cur *domain.Snapshot, diff []changes.Change) []changes.Change {
+	failed := map[string]bool{}
+	for _, snap := range []*domain.Snapshot{prev, cur} {
+		if snap == nil {
+			continue
+		}
+		for section := range snap.Errors {
+			for _, kind := range sectionKinds[section] {
+				failed[kind] = true
+			}
+		}
+	}
+	if len(failed) == 0 {
+		return diff
+	}
+	kept := make([]changes.Change, 0, len(diff))
+	for _, c := range diff {
+		if !failed[c.Kind] {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // Run refreshes in the background until ctx ends.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -148,6 +149,71 @@ func TestPartialErrorDoesNotReportChanges(t *testing.T) {
 	if _, diff, err := svc.Refresh(context.Background(), true); err != nil || len(diff) != 0 {
 		t.Errorf("recovered refresh: diff=%v err=%v", diff, err)
 	}
+}
+
+// A partial error on the first refresh has no previous data to carry over, so
+// the recovery would report every lesson as added. The diff now skips a section
+// that failed on either side.
+func TestFirstRefreshWithPartialErrorDoesNotReportChanges(t *testing.T) {
+	p := &countingProvider{name: "sample", room: "R1", blank: true,
+		errs: map[string]string{"timetable": "503 Service Unavailable"}}
+	svc, _ := setup(t, map[string]*countingProvider{"sample": p})
+	if _, diff, err := svc.Refresh(context.Background(), true); err != nil || len(diff) != 0 {
+		t.Fatalf("first refresh: diff=%v err=%v", diff, err)
+	}
+
+	p.mu.Lock()
+	p.blank = false
+	p.errs = nil
+	p.mu.Unlock()
+	if _, diff, err := svc.Refresh(context.Background(), true); err != nil || len(diff) != 0 {
+		t.Errorf("recovery reported changes: %v err=%v", diff, err)
+	}
+}
+
+// A reader serialising the cached snapshot while a refresh carries over a
+// partial error must not see the write. `go test -race` reports the old version
+// of carryOver here.
+func TestRefreshDoesNotMutateTheCachedSnapshot(t *testing.T) {
+	p := &countingProvider{name: "sample", room: "R1"}
+	svc, _ := setup(t, map[string]*countingProvider{"sample": p})
+	if _, _, err := svc.Refresh(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			snap, err := svc.Overview(context.Background(), false)
+			if err != nil || snap == nil {
+				continue
+			}
+			if _, err := json.Marshal(snap); err != nil {
+				t.Errorf("marshal: %v", err)
+				return
+			}
+		}
+	}()
+
+	p.mu.Lock()
+	p.blank = true
+	p.errs = map[string]string{"timetable": "503 Service Unavailable"}
+	p.mu.Unlock()
+	for i := 0; i < 5; i++ {
+		if _, _, err := svc.Refresh(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(done)
+	wg.Wait()
 }
 
 func TestRefreshErrorIsReported(t *testing.T) {
