@@ -82,12 +82,16 @@ export class Display {
     // WebUntis marks a replaced subject as REMOVED and adds the new one beside
     // it. Only the subjects actually being taught decide visibility, otherwise
     // hiding the subject that was replaced hides the lesson that replaced it.
+    // A lesson whose subjects are all removed has nothing that replaced them,
+    // so it falls back to all of them: hiding that subject still hides the
+    // lesson, as it did before the replaced subject was filtered out.
     const active = subjects.filter((s) => s.status !== "REMOVED");
-    if (active.some((s) => this.override(s.short).hidden)) return false;
+    const shown = active.length ? active : subjects;
+    if (shown.some((s) => this.override(s.short).hidden)) return false;
     const mode = this.settings.get<string>("filters.mode", "none");
     const entries = this.settings.get<string[]>("filters.subjects", []);
     if (mode === "none" || !entries.length) return true;
-    const hit = active.some((s) => entries.some((e) => matchesEntry(s, e)));
+    const hit = shown.some((s) => entries.some((e) => matchesEntry(s, e)));
     // Like `untis --only/--except`: events have no subject, so --only
     // hides them and --except keeps them.
     return mode === "only" ? hit : !hit;

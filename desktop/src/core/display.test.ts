@@ -109,6 +109,20 @@ describe("replaced subjects", () => {
     expect(d.subjectStyle(replaced)).toEqual({ color: "#0000ff", emoji: "📐" });
   });
 
+  it("keeps the lesson hidden when every subject on it is removed", async () => {
+    const allRemoved = lesson("2026-10-07", "09:00", "09:50", "REL", { subjects: [{ short: "REL", status: "REMOVED" }] });
+    const d = await display({ subjects: { custom: { REL: { hidden: true } } } });
+    expect(d.visibleLessons([allRemoved])).toEqual([]);
+  });
+
+  it("matches filters on the only subject there is when all are removed", async () => {
+    const allRemoved = lesson("2026-10-07", "09:00", "09:50", "REL", { subjects: [{ short: "REL", status: "REMOVED" }] });
+    const onlyRel = await display({ filters: { mode: "only", subjects: ["REL"] } });
+    expect(onlyRel.visibleLessons([allRemoved])).toHaveLength(1);
+    const exceptRel = await display({ filters: { mode: "except", subjects: ["REL"] } });
+    expect(exceptRel.visibleLessons([allRemoved])).toEqual([]);
+  });
+
   it("falls back to the first subject when every subject is removed", async () => {
     const allRemoved = lesson("2026-10-07", "09:00", "09:50", "REL", { subjects: [{ short: "REL", status: "REMOVED" }] });
     const d = await display({ subjects: { custom: { REL: { color: "#ff0000" } } } });
