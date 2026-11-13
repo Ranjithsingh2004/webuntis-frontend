@@ -112,9 +112,14 @@ func TestExamsMatchTheirLessons(t *testing.T) {
 func TestWindowFiltersSections(t *testing.T) {
 	today := day(fixedNow)
 	s := snapshot(t, newProvider(), today, today)
+	// Homework is selected by the day it was given, like the CLI, so an item
+	// due after the window still shows up.
+	if len(s.Homework) == 0 {
+		t.Fatal("no homework given inside the window")
+	}
 	for _, h := range s.Homework {
-		if h.DueDate != today.Format(dateLayout) {
-			t.Errorf("homework due %s outside window", h.DueDate)
+		if h.Date != today.Format(dateLayout) {
+			t.Errorf("homework given %s outside window", h.Date)
 		}
 	}
 	if len(s.Messages) != len(messagePlan) {

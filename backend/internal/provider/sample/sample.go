@@ -94,8 +94,10 @@ func (p *Provider) Snapshot(ctx context.Context, q provider.Query) (*domain.Snap
 			s.Exams = append(s.Exams, e)
 		}
 	}
+	// Selected by the day it was given, like the CLI: the window is a lesson
+	// window, and the due date can be past its end.
 	for _, h := range buildHomework(today) {
-		if inWindow(h.DueDate, from, to) {
+		if inWindow(h.Date, from, to) {
 			s.Homework = append(s.Homework, h)
 		}
 	}

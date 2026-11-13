@@ -133,6 +133,10 @@ func diffExams(inBoth func(string) bool, old, cur *domain.Snapshot) []Change {
 	return out
 }
 
+// diffHomework compares homework by the lesson it was given in, which is the
+// day the CLI selects it by (the window is passed to /homeworks/lessons, not
+// used as a due-date filter). Filtering on the due date instead would miss
+// homework given today and due after the window ends.
 func diffHomework(inBoth func(string) bool, old, cur *domain.Snapshot) []Change {
 	before := map[string]bool{}
 	for _, h := range old.Homework {
@@ -140,7 +144,7 @@ func diffHomework(inBoth func(string) bool, old, cur *domain.Snapshot) []Change 
 	}
 	var out []Change
 	for _, h := range cur.Homework {
-		if !before[h.ID] && inBoth(h.DueDate) {
+		if !before[h.ID] && inBoth(h.Date) {
 			out = append(out, Change{Kind: HomeworkAdded, Date: h.DueDate, Subject: shorts(h.Subjects), Detail: h.Text, Ref: h.ID})
 		}
 	}
